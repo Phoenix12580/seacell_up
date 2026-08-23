@@ -41,6 +41,7 @@ def build_metacells(
     capacity_hi: int = 35,
     max_rounds: int = 3,
     pass_rule: str = "mean",
+    hvg_mode: str = "global",
     config: Optional[PipelineConfig] = None,
     **config_kwargs,
 ) -> tuple[ad.AnnData, ad.AnnData, dict]:
@@ -60,7 +61,7 @@ def build_metacells(
     n_jobs:
         并行进程数，-1 = 全核。
     n_top_genes:
-        全局 HVG 数（所有阶段共用基因空间）。
+        HVG 数（global 模式为全数据选一次；per_sample 模式为每块各选）。
     capacity_lo / capacity_hi:
         Metacell 细胞数硬界（默认 20-35）。
     max_rounds:
@@ -68,6 +69,11 @@ def build_metacells(
     pass_rule:
         通过线规则: "mean"（默认，全局平均分）| "median" | "quantile"
         （配 pass_quantile，如 0.85 表示只回收最差 15%）。
+    hvg_mode:
+        "global"（默认）= 全样本合并选一次 HVG，跨块特征统一；
+        "per_sample" = 第一轮各样本独立选 HVG、回收轮用剩余细胞合并选
+        HVG，忠实于每块变异结构（能捕捉样本特异基因如病人克隆；
+        MC 伪体始终全基因聚合，下游跨样本可比性不受影响）。
     config:
         完整 PipelineConfig（给出时忽略上面的散参数，除 config_kwargs）。
     **config_kwargs:
@@ -100,6 +106,7 @@ def build_metacells(
         capacity_hi=capacity_hi,
         max_rounds=max_rounds,
         pass_rule=pass_rule,
+        hvg_mode=hvg_mode,
         **config_kwargs,
     )
     pipe = IterativeMetaCellPipeline(

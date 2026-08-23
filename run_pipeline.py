@@ -29,6 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--input-is-raw", default="auto", choices=["auto", "true", "false"],
                    help="X 是否原始计数（默认自动启发式判断）")
     p.add_argument("--n-top-genes", type=int, default=2048)
+    p.add_argument("--hvg-mode", default="global", choices=["global", "per_sample"],
+                   help="HVG 选择: global=全样本合并选一次(默认, 跨块特征统一); "
+                        "per_sample=第一轮各样本独立选、回收轮用剩余细胞合并选")
     p.add_argument("--n-jobs", type=int, default=-1)
     p.add_argument("--max-rounds", type=int, default=3)
     p.add_argument("--pass-rule", default="mean", choices=["mean", "median", "quantile"],
@@ -61,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = PipelineConfig(
         n_top_genes=args.n_top_genes,
+        hvg_mode=args.hvg_mode,
         n_jobs=args.n_jobs,
         max_rounds=args.max_rounds,
         pass_rule=args.pass_rule,
