@@ -47,11 +47,14 @@ adata_out, mc_adata, report = seacell_up.build_metacells(
 adata_out, mc, report = seacell_up.build_metacells(
     adata,
     sample_key="sampleID",
-    n_top_genes=2048,          # 全局 HVG 数（全阶段共用基因空间）
+    n_top_genes=2048,          # HVG 数（global 模式全数据选一次; per_sample 每块各选）
     capacity_lo=20,            # Metacell 细胞数硬界（默认 20-35）
     capacity_hi=35,
     max_rounds=3,              # 跨样本回收最大轮数
     pass_rule="mean",          # 通过线: mean(默认)/median/quantile
+    hvg_mode="global",         # HVG: "global"=全样本合并选(默认);
+                               #   "per_sample"=第一轮各样本独立选、
+                               #   回收轮用剩余细胞合并选（见下方说明）
     # pass_quantile=0.85,      # pass_rule="quantile" 时只回收最差 15%
     # alpha=0.5, n_neighbors=10, search_rows=5000, ...  # 透传 PipelineConfig
 )
@@ -62,8 +65,21 @@ adata_out, mc, report = seacell_up.build_metacells(
 ```bash
 python run_pipeline.py cells.h5ad --sample-key sampleID \
     --output cells_with_mc.h5ad --metacell-output metacells.h5ad \
-    --n-jobs 16 --report-json report.json
+    --n-jobs 16 --report-json report.json [--hvg-mode per_sample]
 ```
+
+**hvg_mode 两种模式怎么选**（`scripts/exp_hvg_mode.py` 可复现对比）：
+
+| 模式 | 语义 | 何时用 |
+|---|---|---|
+| `global`（默认） | 全样本合并选一次 HVG，各块共用 | 样本组成相近、追求跨块评分可比 |
+| `per_sample` | 第一轮各样本独立选；回收轮用**剩余细胞合并选**（剩余细胞的"全局"HVG） | 样本生物学组成差异大、希望捕捉样本特异高变基因（如病人特异克隆基因） |
+
+两模式的 MC 伪体都在全基因上聚合，下游跨样本比较不受影响，结果可直接对比。
+Zhao 10 样本子集（57,641 细胞，免疫为主）实测：**global 略优**——ct.sub ≥0.95
+占 81.8% vs 78.8%，噪音率 5.9% vs 10.4%（per_sample 下各块评分跨特征空间
+可比性下降、小样本 HVG 方差估计更噪），纯度中位两者同为 1.000。上皮/肿瘤
+为主的场景两者差异可能反转，建议对自己的数据跑一次对比再定。
 
 ### 2. 上皮/肿瘤细胞：CNV 空间按病人分治（可选分支）
 
@@ -183,7 +199,7 @@ python run_pipeline.py cells.h5ad --sample-key sampleID \
 ```
 原始数据 (N cells x S samples)
   │
-  ├─ 预处理: log-normalize + 全局 HVG（全阶段共用基因空间）
+  ├─ 预处理: log-normalize + HVG（global 或 per_sample 模式）
   │
   ├─ 第一阶段: 各样本并行 [自适应降维 -> 三分法搜γ -> GNMF -> 容量约束 -> 打分]
   │      ├─ Score ≤ 全局平均分 ──> 高质量 Metacell 池
@@ -205,6 +221,7 @@ python run_pipeline.py cells.h5ad --sample-key sampleID \
 python tests/test_steps.py                 # Step 1-6 全部（模拟 2 样本 x 5000 细胞）
 python tests/test_steps.py step3           # 单跑某个 step
 pytest tests/test_steps.py -v              # pytest 兼容
+python scripts/exp_hvg_mode.py big.h5ad    # hvg_mode 对比实验
 ```
 
 **实测结果摘要**（固定容量 [20,35]）：
