@@ -46,6 +46,14 @@ class PipelineConfig:
 
     n_top_genes: int = 2048
     target_sum: float = 1e4
+    # HVG 选择模式（用户可选，2026-08-23）:
+    # - "global": 全部样本合并选一次 HVG，各块共用（跨块特征统一，
+    #   但可能漏掉样本特异的高变基因，如病人特异克隆基因）
+    # - "per_sample": 每个块（样本/回收池）内部独立选 HVG，即第一轮
+    #   各样本自己的 HVG、回收轮用剩余细胞合并选 HVG。忠实于每块的
+    #   变异结构。MC 伪体始终在全基因上聚合，下游跨样本可比性不受
+    #   构建期 HVG 选择影响，两种模式的伪体可直接对比。
+    hvg_mode: str = "global"
     # gamma（Metacell 尺寸）搜索范围与三分法迭代数
     gamma_bounds: Tuple[float, float] = (5.0, 500.0)
     n_ternary_iters: int = 6
@@ -122,6 +130,10 @@ def _process_block(
     # 显式可写副本：joblib 多进程下大数组以只读 memmap 传入，原地写会报错
     X = sp.csr_matrix(X_block, dtype=np.float32).copy()
     X.sort_indices()
+    if cfg.hvg_mode == "per_sample" and X.shape[1] > cfg.n_top_genes:
+        # 每块独立选 HVG（样本块=本样本 HVG; 回收池块=剩余细胞合并 HVG）。
+        # 伪体仍在全基因聚合, 不影响下游可比性。
+        X = X[:, select_hvgs(X, cfg.n_top_genes)].tocsr()
     n = X.shape[0]
     t0 = time.time()
 
@@ -264,6 +276,10 @@ class IterativeMetaCellPipeline:
             X_norm = X
 
         t0 = time.time()
+        if self.cfg.hvg_mode == "per_sample":
+            # 块内独立选 HVG（_process_block 内执行），此处返回全基因归一化矩阵
+            logger.info("HVG 模式 per_sample: 各块内部独立选 %d 基因", self.cfg.n_top_genes)
+            return X_norm.tocsr(), (X_raw if X_raw is not None else X_norm), np.arange(X.shape[1])
         hvg = select_hvgs(X_norm, n_top=self.cfg.n_top_genes)
         logger.info(
             "全局 HVG: %d/%d 基因, %.1fs（全阶段共用基因空间）",
